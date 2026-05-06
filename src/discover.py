@@ -25,7 +25,10 @@ from xml.etree import ElementTree as ET
 import nodriver as uc
 from curl_cffi import requests as cf_requests
 
-from src.cf_bypass import get_clearance, CHROME_PATH, _patch_nodriver_cookie_parser, _async_get_clearance
+from src.cf_bypass import (
+    get_clearance, CHROME_PATH, _patch_nodriver_cookie_parser,
+    _async_get_clearance, _browser_args,
+)
 
 
 SITEMAP_URL = "https://www.enterkomputer.com/sitemap.xml"
@@ -106,6 +109,7 @@ async def _async_discover(output_path: Path, limit: int | None) -> int:
     browser = await uc.start(
         headless=False,
         browser_executable_path=CHROME_PATH,
+        browser_args=_browser_args(),
     )
     try:
         page = browser.tabs[0] if browser.tabs else await browser.get("about:blank")

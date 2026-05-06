@@ -15,6 +15,7 @@ network.Cookie.from_json to tolerate the missing key.
 """
 import asyncio
 import logging
+import os
 
 import nodriver as uc
 from nodriver import cdp
@@ -24,6 +25,20 @@ from nodriver.cdp import network
 HOMEPAGE = "https://www.enterkomputer.com/"
 CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 CF_WAIT_SECS = 30
+
+# Pure headless (--headless=new or headless=True) gets blocked by Cloudflare
+# Turnstile. As a workaround, we run a normal Chrome window but position it
+# offscreen so the user doesn't see it. Set EK_SHOW_BROWSER=1 to debug.
+OFFSCREEN_BROWSER_ARGS = [
+    "--window-position=-2400,-2400",
+    "--window-size=1280,800",
+]
+
+
+def _browser_args() -> list[str]:
+    if os.environ.get("EK_SHOW_BROWSER") == "1":
+        return []
+    return list(OFFSCREEN_BROWSER_ARGS)
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +79,7 @@ async def _async_get_clearance() -> tuple[dict, str]:
     browser = await uc.start(
         headless=False,
         browser_executable_path=CHROME_PATH,
+        browser_args=_browser_args(),
     )
     try:
         page = browser.tabs[0] if browser.tabs else await browser.get("about:blank")
