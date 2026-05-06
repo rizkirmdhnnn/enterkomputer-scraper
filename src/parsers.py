@@ -57,14 +57,20 @@ SELECTOR_LISTING_PRODUCT_LINK = "a[href*='/detail/']"
 def parse_product(html: str, url: str) -> dict:
     soup = BeautifulSoup(html, "lxml")
 
-    name = _parse_name(soup)
-    price_idr = _parse_price_element(soup)
+    # Try to read data from context-json div (populated server-side; more
+    # reliable than scraping DOM nodes whose values are filled via AJAX).
+    ctx = _parse_context_json(soup)
+
+    name = (ctx.get("PNAME") or "").strip() or _parse_name(soup)
+    price_idr = _price_from_ctx(ctx) if ctx else _parse_price_element(soup)
     category, subcategory = _parse_breadcrumb(soup)
-    stock_status = _parse_stock(_attr(soup.select_one(SELECTOR_STOCK), ["class"]))
+    stock_status = _stock_from_ctx(ctx) if ctx else _parse_stock(
+        _attr(soup.select_one(SELECTOR_STOCK), ["class"])
+    )
     description = _parse_description(soup)
     specifications = json.dumps(_parse_specs(soup), ensure_ascii=False)
-    image_url = _absolute_image(soup, url)
-    sku = _parse_sku(soup, url)
+    image_url = _image_from_ctx(ctx, url) or _absolute_image(soup, url)
+    sku = str(ctx.get("PCODE") or "").strip() or _parse_sku(soup, url)
 
     return {
         "sku": sku,
@@ -253,3 +259,55 @@ def _parse_sku(soup, url: str) -> str:
     # Fallback: extract product ID from URL pattern /detail/{id}/...
     m = re.search(r"/detail/(\d+)/", url)
     return m.group(1) if m else ""
+
+
+def _parse_context_json(soup) -> dict:
+    """Parse the server-side context JSON blob embedded in a hidden div.
+
+    The site embeds a <div class="d-none context-json">...</div> with a JSON
+    payload that contains price, stock status, image list, and more.  This is
+    more reliable than scraping DOM nodes whose values are populated via AJAX.
+    """
+    node = soup.select_one("div.context-json")
+    if not node:
+        return {}
+    try:
+        return json.loads(node.get_text(strip=True))
+    except (json.JSONDecodeError, ValueError):
+        return {}
+
+
+def _price_from_ctx(ctx: dict) -> int:
+    """Extract price from PPRCZ[0] (regular price in IDR)."""
+    pprcz = ctx.get("PPRCZ")
+    if pprcz and isinstance(pprcz, list) and len(pprcz) > 0:
+        try:
+            return int(pprcz[0])
+        except (TypeError, ValueError):
+            pass
+    return 0
+
+
+def _stock_from_ctx(ctx: dict) -> str:
+    """Derive stock status from PSTTS and PDISP fields.
+
+    PDISP=0 means the product is hidden / not for sale.
+    PSTTS seems to always be 0 in observed data; keep the field for
+    potential future use but treat PDISP=0 as out-of-stock for now.
+    """
+    pdisp = ctx.get("PDISP")
+    if pdisp == 0:
+        return "out_of_stock"
+    if pdisp == 1:
+        return "in_stock"
+    return ""
+
+
+def _image_from_ctx(ctx: dict, page_url: str) -> str:
+    """Return the first image URL from PIMGZ list."""
+    pimgz = ctx.get("PIMGZ")
+    if pimgz and isinstance(pimgz, list) and len(pimgz) > 0:
+        img = pimgz[0]
+        if img and isinstance(img, str):
+            return urljoin(page_url, img)
+    return ""
