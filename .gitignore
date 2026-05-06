@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 venv/
 .env
+!.env.example
 output/
 logs/
 state.json

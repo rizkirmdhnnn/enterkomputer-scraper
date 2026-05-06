@@ -1,4 +1,4 @@
-"""Stage 2 — Discover all product detail URLs on enterkomputer.com.
+"""Stage 2 — Discover all product detail URLs.
 
 Strategy:
   1. Fetch sitemap.xml (fast, polite — one HTTP request via curl_cffi).
@@ -10,14 +10,15 @@ Strategy:
   4. Write deduplicated product URLs to the output file incrementally.
 
 Why nodriver here and not curl_cffi: listing pages render products via the
-internal /jeanne/v2/ API after page load — no product links are in the
-initial HTML. Reverse-engineering that API requires rotating tokens; using
-a real browser is more robust.
+site's internal API after page load — no product links are in the initial
+HTML. Reverse-engineering that API requires rotating tokens; using a real
+browser is more robust.
 """
+from __future__ import annotations
+
 import asyncio
 import logging
 import re
-import time
 from pathlib import Path
 from urllib.parse import urlparse, urljoin
 from xml.etree import ElementTree as ET
@@ -25,19 +26,12 @@ from xml.etree import ElementTree as ET
 import nodriver as uc
 from curl_cffi import requests as cf_requests
 
-from src.cf_bypass import (
-    get_clearance, CHROME_PATH, _patch_nodriver_cookie_parser,
-    _async_get_clearance, _browser_args,
-)
+from src.cf_bypass import _async_get_clearance
+from src.config import CONFIG, require_chrome_path
 
 
-SITEMAP_URL = "https://www.enterkomputer.com/sitemap.xml"
-BASE_URL = "https://enterkomputer.com"
 LISTING_PATH_PATTERNS = ("/category/", "/subcategory/", "/category_brand/")
 DETAIL_PATH_PATTERN = "/detail/"
-POLITE_DELAY = 3.0          # seconds between page navigations
-LOAD_MORE_MAX_CLICKS = 50   # safety cap; categories shouldn't have more than this
-LOAD_MORE_WAIT = 1.5        # seconds to wait after each loadMore click
 
 log = logging.getLogger(__name__)
 
@@ -72,11 +66,12 @@ def parse_sitemap(xml_text: str) -> tuple[list[str], list[str]]:
 
 
 def fetch_sitemap(cookies: dict, user_agent: str) -> str:
-    s = cf_requests.Session(impersonate="chrome120")
+    s = cf_requests.Session(impersonate=CONFIG.impersonate)
     s.headers.update({"User-Agent": user_agent})
+    cookie_domain = "." + urlparse(CONFIG.base_url).netloc.lstrip("www.")
     for k, v in cookies.items():
-        s.cookies.set(k, v, domain=".enterkomputer.com")
-    r = s.get(SITEMAP_URL, timeout=30)
+        s.cookies.set(k, v, domain=cookie_domain)
+    r = s.get(CONFIG.sitemap_url, timeout=30)
     r.raise_for_status()
     return r.text
 
@@ -103,13 +98,13 @@ async def _async_discover(output_path: Path, limit: int | None) -> int:
     if limit is not None:
         listings = listings[:limit]
 
-    log.info("Crawling %d listing pages with nodriver (polite mode, %ss between pages)",
-             len(listings), POLITE_DELAY)
+    log.info("Crawling %d listing pages with nodriver (delay=%ss between pages)",
+             len(listings), CONFIG.discover_delay)
 
     browser = await uc.start(
         headless=False,
-        browser_executable_path=CHROME_PATH,
-        browser_args=_browser_args(),
+        browser_executable_path=require_chrome_path(),
+        browser_args=CONFIG.browser_args(),
     )
     try:
         page = browser.tabs[0] if browser.tabs else await browser.get("about:blank")
@@ -130,7 +125,7 @@ async def _async_discover(output_path: Path, limit: int | None) -> int:
                 log.info("  +%d new (%d total)", added, len(seen))
             else:
                 log.info("  +0 new (%d total)", len(seen))
-            await asyncio.sleep(POLITE_DELAY)
+            await asyncio.sleep(CONFIG.discover_delay)
     finally:
         browser.stop()
 
@@ -152,7 +147,7 @@ async def _crawl_listing(page, listing_url: str) -> list[str]:
     await asyncio.sleep(2)  # stabilization
 
     # Click "Lihat Selengkapnya" / .loadMore until no more remain
-    for _ in range(LOAD_MORE_MAX_CLICKS):
+    for _ in range(CONFIG.load_more_max_clicks):
         clicked = await page.evaluate(
             """
             (() => {
@@ -169,7 +164,7 @@ async def _crawl_listing(page, listing_url: str) -> list[str]:
             clicked = clicked.get("value", 0)
         if not clicked:
             break
-        await asyncio.sleep(LOAD_MORE_WAIT)
+        await asyncio.sleep(CONFIG.load_more_wait)
 
     # Extract product detail URLs
     hrefs = await page.evaluate(
@@ -190,7 +185,7 @@ async def _crawl_listing(page, listing_url: str) -> list[str]:
             h = h.get("value", "")
         if not isinstance(h, str) or not h:
             continue
-        full = urljoin(BASE_URL, h)
+        full = urljoin(CONFIG.base_url, h)
         if "/detail/" in full and full not in seen:
             seen.add(full)
             out.append(full)

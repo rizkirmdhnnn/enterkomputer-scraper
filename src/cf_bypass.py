@@ -1,44 +1,31 @@
-"""Solves the Cloudflare Turnstile challenge on enterkomputer.com using
-nodriver (CDP-based real Chrome) and returns cookies + User-Agent for
-subsequent HTTP requests.
+"""Solves the Cloudflare Turnstile challenge using nodriver (CDP-based real
+Chrome) and returns cookies + User-Agent for subsequent HTTP requests.
 
-Why nodriver and not Playwright: enterkomputer.com uses Cloudflare's managed
+Why nodriver and not Playwright: the site uses Cloudflare's managed
 challenge (Turnstile). Playwright is detected and never clears. nodriver
-uses real Chrome via CDP and clears the challenge within ~3-10 seconds.
+drives a real Chrome instance via CDP, which clears the challenge in seconds.
 
-Known limitation: CHROME_PATH is hardcoded to macOS. Adjust for Linux/Windows.
+Why a visible (offscreen) window and not pure headless: --headless=new and
+headless=True both still get flagged by CF Turnstile, so we run a normal
+window but position it offscreen by default. Configurable via the env vars
+documented in `src/config.py` (`EK_SHOW_BROWSER`, `EK_OFFSCREEN_POSITION`).
 
-Workaround: nodriver==0.48 calls bool(json['sameParty']) when parsing cookies,
-but newer Chrome no longer sends that field, causing the parse to fail and
-the awaited CDP response to deadlock forever. We monkey-patch
-network.Cookie.from_json to tolerate the missing key.
+Workaround: nodriver==0.48 calls bool(json['sameParty']) when parsing
+cookies, but newer Chrome no longer sends that field — the parse fails and
+the awaited CDP response deadlocks. We monkey-patch network.Cookie.from_json
+to tolerate the missing key.
 """
+from __future__ import annotations
+
 import asyncio
 import logging
-import os
 
 import nodriver as uc
 from nodriver import cdp
 from nodriver.cdp import network
 
+from src.config import CONFIG, require_chrome_path
 
-HOMEPAGE = "https://www.enterkomputer.com/"
-CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-CF_WAIT_SECS = 30
-
-# Pure headless (--headless=new or headless=True) gets blocked by Cloudflare
-# Turnstile. As a workaround, we run a normal Chrome window but position it
-# offscreen so the user doesn't see it. Set EK_SHOW_BROWSER=1 to debug.
-OFFSCREEN_BROWSER_ARGS = [
-    "--window-position=-2400,-2400",
-    "--window-size=1280,800",
-]
-
-
-def _browser_args() -> list[str]:
-    if os.environ.get("EK_SHOW_BROWSER") == "1":
-        return []
-    return list(OFFSCREEN_BROWSER_ARGS)
 
 log = logging.getLogger(__name__)
 
@@ -60,7 +47,7 @@ _patch_nodriver_cookie_parser()
 def get_clearance() -> tuple[dict, str]:
     """Synchronous wrapper around the async clearance flow.
 
-    Opens enterkomputer.com via nodriver, waits for the Cloudflare challenge
+    Opens the site homepage via nodriver, waits for the Cloudflare challenge
     to clear, and returns (cookies_dict, user_agent_string).
 
     Returns:
@@ -68,22 +55,24 @@ def get_clearance() -> tuple[dict, str]:
         'cf_clearance' on success. user_agent is the Chrome UA string.
 
     Raises:
-        RuntimeError: If the Cloudflare challenge does not clear within
-            CF_WAIT_SECS seconds.
+        RuntimeError: If Chrome is not installed, or the Cloudflare challenge
+            does not clear within CONFIG.cf_wait_secs seconds.
     """
     return asyncio.run(_async_get_clearance())
 
 
 async def _async_get_clearance() -> tuple[dict, str]:
-    log.info("Starting nodriver to solve Cloudflare challenge")
+    chrome_path = require_chrome_path()
+    log.info("Starting nodriver to solve Cloudflare challenge "
+             "(show_browser=%s)", CONFIG.show_browser)
     browser = await uc.start(
         headless=False,
-        browser_executable_path=CHROME_PATH,
-        browser_args=_browser_args(),
+        browser_executable_path=chrome_path,
+        browser_args=CONFIG.browser_args(),
     )
     try:
         page = browser.tabs[0] if browser.tabs else await browser.get("about:blank")
-        await page.get(HOMEPAGE)
+        await page.get(CONFIG.base_url)
         await _wait_for_clearance(page)
 
         cookies_list = await page.send(cdp.storage.get_cookies())
@@ -104,7 +93,7 @@ async def _async_get_clearance() -> tuple[dict, str]:
 
 
 async def _wait_for_clearance(page) -> None:
-    for i in range(CF_WAIT_SECS):
+    for i in range(CONFIG.cf_wait_secs):
         await asyncio.sleep(1)
         try:
             title = await page.evaluate("document.title")
@@ -115,6 +104,6 @@ async def _wait_for_clearance(page) -> None:
         except Exception:
             pass
     raise RuntimeError(
-        f"Cloudflare challenge did not clear within {CF_WAIT_SECS}s "
-        f"on {HOMEPAGE}"
+        f"Cloudflare challenge did not clear within {CONFIG.cf_wait_secs}s "
+        f"on {CONFIG.base_url}"
     )

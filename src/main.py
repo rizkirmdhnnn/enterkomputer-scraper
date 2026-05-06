@@ -1,4 +1,4 @@
-"""CLI entry point for the enterkomputer.com scraper.
+"""CLI entry point for the scraper.
 
 Stages:
   bypass   — solve Cloudflare challenge once, cache cookies + UA in-memory
@@ -8,12 +8,18 @@ Stages:
 
 The pipeline is resumable: re-running with `urls.txt` and `state.json` present
 skips discovery and continues scraping from where it left off.
+
+Most knobs (Chrome path, polite delays, base URL, etc.) are configured via
+environment variables — see `src/config.py` and `.env.example`.
 """
+from __future__ import annotations
+
 import argparse
 import logging
 from pathlib import Path
 
 from src.cf_bypass import get_clearance
+from src.config import CONFIG
 from src.discover import discover_product_urls
 from src.scrape import scrape_all
 
@@ -25,8 +31,10 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Scrape enterkomputer.com catalog")
     p.add_argument("--stage", choices=["bypass", "discover", "scrape", "all"],
                    default="all")
-    p.add_argument("--rate", type=float, default=3.0,
-                   help="Seconds between detail-page requests (default 3.0, polite)")
+    p.add_argument("--rate", type=float, default=None,
+                   help="Seconds between detail-page requests "
+                        "(default: 3.0, or EK_SCRAPE_RATE env var). "
+                        "Higher = more polite.")
     p.add_argument("--output", default="output/products.csv")
     p.add_argument("--state", default="state.json")
     p.add_argument("--urls-file", default="urls.txt")
@@ -59,6 +67,20 @@ def run_discover(urls_file: str, limit: int | None) -> None:
     logging.info("Discovery wrote %d URLs to %s", n, urls_file)
 
 
+def _resolve_rate(cli_rate: float | None) -> float:
+    """CLI flag wins; otherwise fall back to EK_SCRAPE_RATE env var, else 3.0."""
+    if cli_rate is not None:
+        return cli_rate
+    import os
+    raw = os.environ.get("EK_SCRAPE_RATE")
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return 3.0
+
+
 def run_scrape(args: argparse.Namespace, cookies: dict, user_agent: str) -> None:
     urls_path = Path(args.urls_file)
     if args.limit is not None:
@@ -71,13 +93,16 @@ def run_scrape(args: argparse.Namespace, cookies: dict, user_agent: str) -> None
     else:
         urls_to_scrape = urls_path
 
+    rate = _resolve_rate(args.rate)
+    logging.info("Scrape rate: %.2fs between requests", rate)
+
     counts = scrape_all(
         urls_file=urls_to_scrape,
         csv_path=Path(args.output),
         state_path=Path(args.state),
         cookies=cookies,
         user_agent=user_agent,
-        rate=args.rate,
+        rate=rate,
         refresh_cookies=get_clearance,
         failed_urls_path=Path(args.failed_urls_file),
     )

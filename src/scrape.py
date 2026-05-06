@@ -1,16 +1,19 @@
 """Stage 3 — fetch each product detail URL via curl_cffi (Chrome TLS
 fingerprint mimicry) and write a CSV row.
 
-Why curl_cffi and not plain requests: enterkomputer.com is behind Cloudflare
-which fingerprints TLS handshakes. Plain `requests` is detected and blocked.
+Why curl_cffi and not plain requests: the site is behind Cloudflare which
+fingerprints TLS handshakes. Plain `requests` is detected and blocked.
 curl_cffi impersonates Chrome's TLS fingerprint, so the cf_clearance cookie
 plus matching fingerprint is enough to pass.
 """
+from __future__ import annotations
+
 import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
 from curl_cffi import requests as cf_requests
 from curl_cffi.requests.exceptions import RequestException, Timeout
@@ -19,9 +22,16 @@ from tenacity import (
     wait_exponential,
 )
 
+from src.config import CONFIG
 from src.csv_writer import CsvWriter
 from src.parsers import parse_product
 from src.state import State
+
+
+def _cookie_domain() -> str:
+    """Return the apex domain (with leading dot) for cookie scope."""
+    netloc = urlparse(CONFIG.base_url).netloc
+    return "." + netloc.lstrip("www.")
 
 
 log = logging.getLogger(__name__)
@@ -49,11 +59,12 @@ def _get(session, url: str):
 
 
 def _build_session(cookies: dict, user_agent: str):
-    s = cf_requests.Session(impersonate="chrome120")
+    s = cf_requests.Session(impersonate=CONFIG.impersonate)
     s.headers.update({"User-Agent": user_agent})
+    domain = _cookie_domain()
     for k, v in cookies.items():
         # Cookies set on the apex domain so subdomain requests pick them up
-        s.cookies.set(k, v, domain=".enterkomputer.com")
+        s.cookies.set(k, v, domain=domain)
     return s
 
 
@@ -125,6 +136,7 @@ def _fetch_with_refresh(
         cookies, ua = refresh_cookies()
         session.headers["User-Agent"] = ua
         session.cookies.clear()
+        domain = _cookie_domain()
         for k, v in cookies.items():
-            session.cookies.set(k, v, domain=".enterkomputer.com")
+            session.cookies.set(k, v, domain=domain)
         return _get(session, url)
