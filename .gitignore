@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+output/
+logs/
+state.json
+urls.txt
+failed_urls.txt
+.pytest_cache/
+.DS_Store
