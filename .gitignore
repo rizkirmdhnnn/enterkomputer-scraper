@@ -12,3 +12,4 @@ urls.txt.limited
 failed_urls.txt
 .pytest_cache/
 .DS_Store
+docs/superpowers/
