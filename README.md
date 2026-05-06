@@ -5,12 +5,6 @@ ke file CSV. Bisa lewat proteksi Cloudflare, jalan dengan jeda antar request
 biar nggak ngebebanin server, dan kalau di tengah jalan terputus bisa
 dilanjut dari tempat berhenti.
 
-> ⚠️ **Catatan penting.** `robots.txt` situs ini tidak mengizinkan scraping
-> selain Googlebot. Project ini dibikin **buat belajar dan eksperimen
-> teknis**. Pakai cuma di situs sendiri, server test, atau dengan izin dari
-> pemilik situs. Jangan dipakai buat republish data secara komersial. Default
-> setting-nya kasih jeda 3 detik antar request supaya nggak agresif ke server.
-
 ---
 
 ## Cara kerja singkat
