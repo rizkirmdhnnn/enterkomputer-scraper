@@ -1,82 +1,84 @@
 # Enterkomputer Scraper
 
-A polite, resumable scraper for the [enterkomputer.com](https://www.enterkomputer.com/)
-PC-parts catalog. Uses **`nodriver`** to solve Cloudflare Turnstile and **`curl_cffi`**
-(Chrome TLS fingerprint mimicry) for fast detail-page fetches. Output is a
-single CSV with full product info.
+Scraper polite dan resumable untuk katalog produk [enterkomputer.com](https://www.enterkomputer.com/).
+Pakai **`nodriver`** untuk bypass Cloudflare Turnstile dan **`curl_cffi`**
+(Chrome TLS fingerprint mimicry) buat fetch detail produk dengan cepat.
+Output berupa satu file CSV berisi info produk lengkap.
 
-> ⚠️ **Disclaimer.** The site's `robots.txt` disallows non-Googlebot scraping
-> (`User-agent: * / Disallow: /`). This project is published for **educational
-> and research purposes only**. Use it on a site you own, on a test target,
-> or with the site owner's explicit permission. The defaults run in
-> single-threaded "polite" mode (3 seconds between requests). Do not republish
-> the scraped data commercially.
+> ⚠️ **Disclaimer.** `robots.txt` situs ini melarang scraping non-Googlebot
+> (`User-agent: * / Disallow: /`). Project ini dipublikasikan **untuk tujuan
+> edukasi dan riset saja**. Pakai di situs milik sendiri, target test, atau
+> dengan izin eksplisit dari pemilik situs. Default-nya jalan polite mode
+> single-thread (3 detik antar request). Jangan dipakai untuk republish data
+> secara komersial.
 
 ---
 
-## Why this exists
+## Kenapa project ini ada
 
-Most public scraper recipes break against Cloudflare's modern stack:
+Banyak resep scraper publik nggak jalan lagi melawan stack Cloudflare modern:
 
-- Plain `requests` → 403 (TLS fingerprint mismatch).
-- `Playwright` (even with stealth plugins) → blocked by Turnstile.
-- Pure headless Chrome → also detected.
-- Listing pages on the target render products via an internal JSON API with
-  rotating signed tokens — reverse-engineering it is fragile.
+- `requests` biasa → 403 (TLS fingerprint mismatch).
+- `Playwright` (bahkan dengan stealth plugin) → ke-detect Turnstile.
+- Pure headless Chrome → juga ke-detect.
+- Listing page situs target render produk via internal JSON API dengan
+  rotating signed token — reverse-engineering rapuh dan ribet.
 
-This project documents a working hybrid that keeps things simple:
+Project ini mendokumentasikan kombinasi hybrid yang terbukti jalan dan tetap
+sederhana:
 
-| Stage | Tool | Why |
+| Tahap | Tool | Kenapa |
 |---|---|---|
-| Cloudflare bypass | [`nodriver`](https://github.com/ultrafunkamsterdam/nodriver) + real Chrome | Pure CDP control of a real binary; clears Turnstile in 5–10 s. |
-| URL discovery | nodriver (browser navigation) | Listing pages need JS. Sitemap.xml gives navigation URLs to crawl. |
-| Detail fetch | [`curl_cffi`](https://github.com/lexiforest/curl_cffi) (`impersonate="chrome120"`) | Mimics Chrome TLS handshake — pairs with the `cf_clearance` cookie to pass CF without launching a browser per request. |
+| Cloudflare bypass | [`nodriver`](https://github.com/ultrafunkamsterdam/nodriver) + Chrome asli | Kontrol penuh real Chrome via CDP; clear Turnstile dalam 5–10 detik. |
+| URL discovery | nodriver (browser navigation) | Listing page butuh JS. Sitemap.xml jadi sumber URL kategori untuk di-crawl. |
+| Detail fetch | [`curl_cffi`](https://github.com/lexiforest/curl_cffi) (`impersonate="chrome120"`) | Mimik TLS handshake Chrome — dipasangkan dengan cookie `cf_clearance` cukup buat lewat CF tanpa launch browser per request. |
 
-The result: **5 089 products in ~2 hours** at 3 s polite rate, on a single
-laptop, with zero failed requests and full resume support if interrupted.
+Hasilnya: **5.089 produk dalam ±2 jam** di rate polite 3 detik, di laptop
+biasa, dengan zero failed request dan resume support penuh kalau terinterupsi.
 
 ---
 
-## How it works
+## Cara kerjanya
 
 ```
-┌─────────────┐   ┌───────────────┐   ┌──────────────┐   ┌──────────┐
+┌─────────────┐   ┌────────────────┐   ┌──────────────┐   ┌──────────┐
 │ 1. CF bypass│──▶│ 2. Discover    │──▶│ 3. Scrape    │──▶│ 4. Output│
 │  (nodriver) │   │  (sitemap +    │   │  (curl_cffi  │   │  (CSV +  │
 │  → cookies  │   │   nodriver     │   │   + cookies) │   │   state) │
-│  + UA       │   │   for listings)│   │              │   │          │
-└─────────────┘   └───────────────┘   └──────────────┘   └──────────┘
+│  + UA       │   │   untuk listing│   │              │   │          │
+└─────────────┘   └────────────────┘   └──────────────┘   └──────────┘
 ```
 
-1. **Bypass** — open the homepage in Chrome via nodriver, wait for the
-   Turnstile challenge to clear, extract `cf_clearance` cookie + matching
-   User-Agent.
-2. **Discover** — fetch `/sitemap.xml`, parse listing-page URLs
-   (`/category/`, `/subcategory/`, `/category_brand/`), then visit each
-   listing in nodriver, click "Lihat Selengkapnya" until exhausted, and
-   collect every `/detail/` link. Output: `urls.txt` (~5 000 unique URLs).
-3. **Scrape** — for each URL, fetch via `curl_cffi` with the cookies + UA,
-   parse the embedded product JSON (`PPRCZ`, `PDISP`, `PIMGZ`) plus the
-   breadcrumb. Append to `output/products.csv`. Mark done in `state.json`.
-4. **Output** — incremental writes; a crash/Ctrl-C never loses progress.
+1. **Bypass** — buka homepage di Chrome lewat nodriver, tunggu challenge
+   Turnstile clear, ekstrak cookie `cf_clearance` + User-Agent yang cocok.
+2. **Discover** — fetch `/sitemap.xml`, parse URL listing
+   (`/category/`, `/subcategory/`, `/category_brand/`), lalu buka tiap
+   listing di nodriver, klik "Lihat Selengkapnya" sampai habis, kumpulkan
+   semua link `/detail/`. Output: `urls.txt` (~5.000 URL unik).
+3. **Scrape** — untuk tiap URL, fetch via `curl_cffi` dengan cookies + UA,
+   parse JSON produk yang di-embed (`PPRCZ`, `PDISP`, `PIMGZ`) plus
+   breadcrumb. Append ke `output/products.csv`. Mark done di `state.json`.
+4. **Output** — incremental write; crash atau Ctrl-C nggak akan kehilangan
+   progress.
 
-Notable engineering details:
+Detail engineering yang menarik:
 
-- Chrome window is **launched offscreen** (`--window-position=-2400,-2400`)
-  by default so it's not visually intrusive. Pure headless gets blocked by
-  Cloudflare; offscreen has the same UX with a visible (to CF) GPU pipeline.
-- nodriver has [a deadlock bug](https://github.com/ultrafunkamsterdam/nodriver/issues/)
-  where `Cookie.from_json` fails on Chrome's missing `sameParty` field;
-  we monkey-patch it.
-- Detail pages embed a server-side JSON blob (`<div class="d-none context-json">`)
-  with prices/stock/images. Targeting that is far more robust than DOM
-  selectors that get rewritten by AJAX after page load.
+- Window Chrome **dibuka offscreen** (`--window-position=-2400,-2400`)
+  secara default supaya nggak mengganggu visual. Pure headless di-block
+  Cloudflare; offscreen UX-nya sama persis tapi GPU pipeline-nya tetap
+  terlihat oleh CF.
+- nodriver punya [bug deadlock](https://github.com/ultrafunkamsterdam/nodriver/issues/)
+  di mana `Cookie.from_json` gagal karena Chrome nggak ngirim field
+  `sameParty`; di-monkey-patch.
+- Detail page meng-embed JSON server-side (`<div class="d-none context-json">`)
+  berisi harga/stok/gambar. Target ini jauh lebih robust daripada DOM
+  selector yang di-rewrite oleh AJAX setelah page load.
 
 ---
 
 ## Setup
 
-**Requirements:** Python 3.11+, Google Chrome (or Chromium/Brave) installed.
+**Persyaratan:** Python 3.11+, Google Chrome (atau Chromium/Brave) terinstall.
 
 ```bash
 git clone https://github.com/rizkirmdhnnn/enterkomputer-scraper.git
@@ -86,176 +88,180 @@ source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-That's it. No `playwright install`, no separate browser download — the
-scraper drives your local Chrome.
+Selesai. Nggak perlu `playwright install`, nggak perlu download browser
+terpisah — scraper-nya pakai Chrome yang sudah ada di komputer kamu.
 
 ### Custom Chrome path
 
-The scraper auto-detects Chrome in standard locations on macOS, Linux, and
-Windows. If yours is elsewhere, copy `.env.example` to `.env` and set:
+Scraper akan auto-detect Chrome di lokasi standar untuk macOS, Linux, dan
+Windows. Kalau Chrome kamu di lokasi lain, copy `.env.example` ke `.env`
+dan set:
 
 ```bash
 cp .env.example .env
-# then edit .env, e.g.:
+# lalu edit .env, contoh:
 EK_CHROME_PATH=/snap/bin/chromium
 ```
 
-`.env` is git-ignored. See [`.env.example`](.env.example) for every knob
-(rate limits, offscreen window position, base URL, etc.).
+`.env` sudah di-gitignore. Lihat [`.env.example`](.env.example) untuk semua
+opsi config (rate limit, posisi offscreen window, base URL, dst).
 
 ---
 
-## Usage
+## Cara pakai
 
 ```bash
-# Full pipeline (default rate: 3s, polite, browser hidden)
+# Pipeline lengkap (default rate: 3s, polite, browser tersembunyi)
 python -m src.main --stage all
 
-# Only solve the Cloudflare challenge (smoke test)
+# Cuma solve Cloudflare challenge (smoke test)
 python -m src.main --stage bypass
 
-# Only discover URLs (writes urls.txt)
+# Cuma discover URL (tulis ke urls.txt)
 python -m src.main --stage discover
 
-# Only scrape (assumes urls.txt exists from a prior discover run)
+# Cuma scrape (asumsi urls.txt sudah ada dari discover sebelumnya)
 python -m src.main --stage scrape
 
-# Smoke test on first 5 URLs
+# Smoke test: scrape 5 URL pertama
 python -m src.main --stage scrape --limit 5
 
-# Faster (1 second between requests). Only with permission/own site.
+# Lebih cepat (1 detik antar request). Hanya kalau ada izin / situs sendiri.
 python -m src.main --stage scrape --rate 1.0
 
-# Show the Chrome window during the run (debug)
+# Tampilkan window Chrome saat run (untuk debug)
 EK_SHOW_BROWSER=1 python -m src.main --stage all
 ```
 
-### Resumability
+### Resumable
 
-The pipeline is fully resumable:
+Pipeline-nya fully resumable:
 
-- `urls.txt` exists → discovery is skipped (delete it to re-run).
-- `state.json` tracks completed URLs → re-running skips them and continues
-  from where you left off.
+- Kalau `urls.txt` sudah ada → discovery di-skip (hapus filenya kalau mau
+  ulang dari awal).
+- `state.json` mencatat URL yang sudah selesai → re-run akan skip yang
+  sudah selesai dan lanjut dari tempat berhenti.
 
-If a run is killed mid-way, just rerun the same command. No data loss.
+Kalau run di-kill di tengah, tinggal jalankan command yang sama lagi. Nggak
+ada data hilang.
 
 ---
 
-## Configuration
+## Konfigurasi
 
-Every knob has a sensible default. Override via environment variables (or
-a `.env` file):
+Setiap knob punya default yang masuk akal. Override via environment variable
+(atau file `.env`):
 
-| Variable | Default | What it does |
+| Variabel | Default | Fungsi |
 |---|---|---|
-| `EK_CHROME_PATH` | auto-detect | Path to Chrome/Chromium/Brave binary |
-| `EK_SHOW_BROWSER` | `0` (hidden offscreen) | `1` to show the browser window |
-| `EK_OFFSCREEN_POSITION` | `-2400,-2400` | `x,y` for hidden mode |
-| `EK_WINDOW_SIZE` | `1280,800` | `w,h` of the Chrome window |
-| `EK_CF_WAIT_SECS` | `30` | Max seconds for the CF challenge to clear |
-| `EK_BASE_URL` | `https://www.enterkomputer.com/` | Site homepage |
-| `EK_SITEMAP_URL` | (auto) | Sitemap location |
-| `EK_DISCOVER_DELAY` | `3.0` | Seconds between listing-page visits |
-| `EK_LOAD_MORE_MAX_CLICKS` | `50` | Safety cap on "Lihat Selengkapnya" clicks |
-| `EK_LOAD_MORE_WAIT` | `1.5` | Seconds to wait after each loadMore click |
-| `EK_SCRAPE_RATE` | `3.0` | Seconds between detail-page requests |
-| `EK_IMPERSONATE` | `chrome120` | curl_cffi browser profile |
+| `EK_CHROME_PATH` | auto-detect | Path ke binary Chrome/Chromium/Brave |
+| `EK_SHOW_BROWSER` | `0` (offscreen) | Set `1` untuk munculin window Chrome |
+| `EK_OFFSCREEN_POSITION` | `-2400,-2400` | Koordinat `x,y` saat hidden mode |
+| `EK_WINDOW_SIZE` | `1280,800` | Ukuran `w,h` window Chrome |
+| `EK_CF_WAIT_SECS` | `30` | Maksimal detik tunggu CF challenge clear |
+| `EK_BASE_URL` | `https://www.enterkomputer.com/` | Homepage situs |
+| `EK_SITEMAP_URL` | (auto) | Lokasi sitemap |
+| `EK_DISCOVER_DELAY` | `3.0` | Detik antar kunjungan listing page |
+| `EK_LOAD_MORE_MAX_CLICKS` | `50` | Safety cap untuk klik "Lihat Selengkapnya" |
+| `EK_LOAD_MORE_WAIT` | `1.5` | Detik tunggu setelah tiap klik loadMore |
+| `EK_SCRAPE_RATE` | `3.0` | Detik antar request ke detail page |
+| `EK_IMPERSONATE` | `chrome120` | Profile browser curl_cffi |
 
-CLI flags always override env vars.
+CLI flag selalu menang dari env var.
 
 ---
 
 ## Output
 
-| File | Contents |
+| File | Isi |
 |---|---|
-| `output/products.csv` | One row per product (11 columns, see below) |
-| `state.json` | URLs that have been successfully scraped (resume marker) |
-| `urls.txt` | Discovered product detail URLs (one per line) |
-| `failed_urls.txt` | URLs that failed after retries — replay with `--stage scrape` |
-| `logs/scraper.log` | Run log (INFO + WARN + ERROR) |
+| `output/products.csv` | Satu row per produk (11 kolom, lihat di bawah) |
+| `state.json` | URL yang sudah berhasil di-scrape (untuk resume) |
+| `urls.txt` | URL detail produk hasil discovery (satu per baris) |
+| `failed_urls.txt` | URL yang gagal setelah retry — bisa di-replay dengan `--stage scrape` |
+| `logs/scraper.log` | Log run (INFO + WARN + ERROR) |
 
-### CSV schema
+### Schema CSV
 
-| Column | Type | Notes |
+| Kolom | Tipe | Catatan |
 |---|---|---|
-| `sku` | string | Product ID from the URL or page |
-| `name` | string | Product title |
-| `category` | string | Top-level category from breadcrumb/embedded JSON |
-| `subcategory` | string | Second-level category if present |
-| `price_idr` | integer | Price in IDR (cleaned of separators) |
-| `stock_status` | string | `in_stock` / `out_of_stock` / `preorder` / raw label |
-| `description` | string | Plain-text description (falls back to `og:description`) |
-| `specifications` | string | JSON-encoded spec table (may be empty) |
-| `image_url` | string | Absolute URL of the primary product image |
-| `product_url` | string | Canonical detail-page URL |
-| `scraped_at` | string | ISO 8601 UTC timestamp |
+| `sku` | string | ID produk dari URL atau halaman |
+| `name` | string | Nama produk |
+| `category` | string | Kategori utama dari breadcrumb / embedded JSON |
+| `subcategory` | string | Sub-kategori kalau ada |
+| `price_idr` | integer | Harga IDR (sudah dibersihkan dari pemisah) |
+| `stock_status` | string | `in_stock` / `out_of_stock` / `preorder` / label asli |
+| `description` | string | Deskripsi plain-text (fallback ke `og:description`) |
+| `specifications` | string | Spec table dalam JSON (bisa kosong) |
+| `image_url` | string | URL absolut gambar utama produk |
+| `product_url` | string | URL kanonik halaman detail |
+| `scraped_at` | string | Timestamp ISO 8601 UTC |
 
 ---
 
 ## Development
 
 ```bash
-# Run all tests (no network needed — uses captured HTML fixtures)
+# Jalankan semua test (nggak butuh network — pakai HTML fixture)
 .venv/bin/pytest tests/ -v
 ```
 
-The fixture-based parser tests live in `tests/test_parsers.py`. To regenerate
-fixtures against a fresh page snapshot, see `scripts/capture_fixtures.py`.
+Test parser berbasis fixture ada di `tests/test_parsers.py`. Untuk regenerate
+fixture dari snapshot halaman terbaru, lihat `scripts/capture_fixtures.py`.
 
-### Project layout
+### Struktur project
 
 ```
 src/
-├── config.py        # env-driven configuration (single source of truth)
-├── cf_bypass.py     # Cloudflare Turnstile bypass via nodriver
-├── discover.py      # Sitemap + listing-page URL collection
-├── scrape.py        # Detail-page fetching + CSV row writing
-├── parsers.py       # Pure HTML→dict parsers (HTML in, data out)
-├── csv_writer.py    # Incremental CSV writes (single-shot header)
-├── state.py         # Resume-state JSON helpers
-└── main.py          # CLI entry point
-tests/               # Unit tests + HTML fixtures
-scripts/             # Helper scripts (e.g. fixture capture)
+├── config.py        # konfigurasi env-driven (single source of truth)
+├── cf_bypass.py     # bypass Cloudflare Turnstile via nodriver
+├── discover.py      # kumpulin URL dari sitemap + listing page
+├── scrape.py        # fetch detail page + tulis row CSV
+├── parsers.py       # parser HTML→dict murni (HTML in, data out)
+├── csv_writer.py    # incremental CSV write (header sekali tulis)
+├── state.py         # helper resume-state JSON
+└── main.py          # entry point CLI
+tests/               # unit test + HTML fixture
+scripts/             # script helper (mis. capture fixture)
 ```
 
 ---
 
-## Adapting to other sites
+## Adaptasi ke situs lain
 
-This project's architecture (nodriver + curl_cffi + sitemap-driven discovery)
-is reusable for many Cloudflare-protected catalog sites. To adapt:
+Arsitektur project ini (nodriver + curl_cffi + sitemap-driven discovery)
+bisa di-reuse untuk banyak situs katalog yang dilindungi Cloudflare. Cara
+adaptasi:
 
-1. Update `EK_BASE_URL` and `EK_SITEMAP_URL` (in `.env` or `src/config.py`).
-2. Adjust the `LISTING_PATH_PATTERNS` and `DETAIL_PATH_PATTERN` in
-   `src/discover.py` to match the new site's URL scheme.
-3. Rewrite the CSS selectors in `src/parsers.py` to match the new HTML
-   layout (capture fixtures with `scripts/capture_fixtures.py` first).
+1. Update `EK_BASE_URL` dan `EK_SITEMAP_URL` (di `.env` atau `src/config.py`).
+2. Sesuaikan `LISTING_PATH_PATTERNS` dan `DETAIL_PATH_PATTERN` di
+   `src/discover.py` agar match dengan skema URL situs baru.
+3. Rewrite CSS selector di `src/parsers.py` agar match dengan layout HTML
+   situs baru (capture fixture dulu pakai `scripts/capture_fixtures.py`).
 
-You'll likely keep `cf_bypass.py`, `state.py`, `csv_writer.py`, and `main.py`
-nearly verbatim.
-
----
-
-## Known limitations
-
-- Only macOS/Linux/Windows desktops with a graphical session — won't work
-  on a headless Linux server unless you run it under Xvfb (the offscreen
-  trick still needs a display server to lie to).
-- Per-product **descriptions** and **specifications tables** load via AJAX
-  and aren't in the static HTML. The scraper falls back to `og:description`
-  for those. Hitting the AJAX endpoint per product would be more thorough
-  but requires reverse-engineering rotating tokens.
-- nodriver prints a benign `RuntimeError: Event loop is closed` warning on
-  shutdown (Python 3.13 / asyncio cleanup interaction). Cosmetic only.
+`cf_bypass.py`, `state.py`, `csv_writer.py`, dan `main.py` kemungkinan besar
+nggak perlu diubah.
 
 ---
 
-## License
+## Limitasi yang diketahui
 
-MIT. See [LICENSE](LICENSE) if present, otherwise treat as MIT.
+- Cuma jalan di desktop macOS/Linux/Windows dengan graphical session — nggak
+  jalan di Linux server headless kecuali pakai Xvfb (trik offscreen tetap
+  butuh display server untuk dibohongi).
+- **Deskripsi** dan **tabel spesifikasi** per produk di-load via AJAX dan
+  nggak ada di HTML statis. Scraper fallback ke `og:description` untuk
+  field tersebut. Hit endpoint AJAX per produk akan lebih lengkap tapi
+  butuh reverse-engineering rotating token.
+- nodriver mengeluarkan warning `RuntimeError: Event loop is closed` saat
+  shutdown (interaksi cleanup Python 3.13 / asyncio). Cosmetic doang.
 
-This project is provided as-is, for educational and research purposes. The
-authors take no responsibility for misuse. Respect target-site `robots.txt`
-and ToS; obtain permission before commercial scraping.
+---
+
+## Lisensi
+
+MIT. Lihat [LICENSE](LICENSE).
+
+Project ini disediakan apa adanya, untuk tujuan edukasi dan riset.
+Authors tidak bertanggung jawab atas penyalahgunaan. Hormati `robots.txt`
+dan ToS situs target; minta izin sebelum scraping komersial.
