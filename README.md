@@ -13,17 +13,18 @@ dilanjut dari tempat berhenti.
 ┌─────────────┐   ┌────────────────┐   ┌──────────────┐   ┌──────────┐
 │ 1. Lewat CF │──▶│ 2. Kumpulin    │──▶│ 3. Ambil     │──▶│ 4. Tulis │
 │  (nodriver) │   │    URL produk  │   │    detail    │   │    CSV   │
-│  → cookie   │   │  (sitemap +    │   │  (curl_cffi  │   │          │
-│  + UA       │   │   nodriver)    │   │   + cookie)  │   │          │
+│  → cookie   │   │  (API langsung │   │  (curl_cffi  │   │          │
+│  + UA       │   │   /jeanne/v2/) │   │   + cookie)  │   │          │
 └─────────────┘   └────────────────┘   └──────────────┘   └──────────┘
 ```
 
 1. **Lewat Cloudflare** — buka homepage di Chrome lewat nodriver, tunggu
    challenge selesai, ambil cookie `cf_clearance` + User-Agent yang dipakai.
-2. **Kumpulin URL** — fetch `/sitemap.xml`, ambil URL kategori
-   (`/category/`, `/subcategory/`, `/category_brand/`), lalu kunjungi tiap
-   kategori di nodriver, klik "Lihat Selengkapnya" sampai habis, kumpulin
-   semua link `/detail/`. Hasil: `urls.txt` (~5.000 URL).
+2. **Kumpulin URL** — fetch `/sitemap.xml` buat dapat daftar `KCODE`
+   kategori, ambil token + signature dari atribut HTML satu category page,
+   lalu hit API internal `/jeanne/v2/product-list` per kategori dengan
+   paginasi sampai habis. Build URL dari `PCODE` + `PLINK`. Hasil:
+   `urls.txt` (~16.000 URL dalam ~4 menit).
 3. **Ambil detail** — buat tiap URL, fetch via `curl_cffi` dengan cookie +
    UA tadi. Parse JSON produk yang sudah di-embed di HTML (field `PPRCZ`,
    `PDISP`, `PIMGZ`) plus breadcrumb. Tulis ke `output/products.csv`.
