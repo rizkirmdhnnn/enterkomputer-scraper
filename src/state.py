@@ -1,14 +1,20 @@
 import json
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
 
 class State:
-    """Persists the set of already-scraped URLs to a JSON file for resume support."""
+    """Persists the set of already-scraped URLs to a JSON file for resume support.
+
+    Thread-safe: concurrent calls to `mark_done` and `completed_urls` are
+    serialized via an internal lock.
+    """
 
     def __init__(self, path: Path):
         self.path = Path(path)
         self._completed: set[str] = set()
+        self._lock = threading.Lock()
         self._load()
 
     def _load(self) -> None:
@@ -18,15 +24,18 @@ class State:
         self._completed = set(data.get("completed_urls", []))
 
     def completed_urls(self) -> set[str]:
-        return set(self._completed)
+        with self._lock:
+            return set(self._completed)
 
     def mark_done(self, url: str) -> None:
-        if url in self._completed:
-            return
-        self._completed.add(url)
-        self._flush()
+        with self._lock:
+            if url in self._completed:
+                return
+            self._completed.add(url)
+            self._flush_locked()
 
-    def _flush(self) -> None:
+    def _flush_locked(self) -> None:
+        """Caller must hold self._lock."""
         payload = {
             "completed_urls": sorted(self._completed),
             "last_updated": datetime.now(timezone.utc).isoformat(),

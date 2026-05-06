@@ -95,9 +95,29 @@ python -m src.main --stage scrape --limit 5
 # Lebih cepat (1 detik antar request) — pastikan kamu punya izin dulu
 python -m src.main --stage scrape --rate 1.0
 
+# Parallel scrape: 5 worker, jeda 0.5s per worker (~1.3x lebih cepat)
+python -m src.main --stage scrape --workers 5 --rate 0.5
+
 # Kalau mau lihat browser-nya saat run (buat debug)
 EK_SHOW_BROWSER=1 python -m src.main --stage all
 ```
+
+### Parallel scrape (`--workers`)
+
+Default `--workers 1` (sequential). Bisa ditambah buat paralelisme:
+
+| Config | Hasil benchmark (30 URL) | Catatan |
+|--|--|--|
+| `--workers 1 --rate 0.1` | 22.1s, 0 gagal | Baseline single-thread |
+| `--workers 5 --rate 0.5` | 16.6s, 0 gagal | **Sweet spot** (~1.3x lebih cepat) |
+| `--workers 10 --rate 0.5` | 29 dari 30 GAGAL | Cloudflare block — terlalu agresif |
+
+**Rekomendasi:** maksimal 5-7 worker. Lebih dari itu Cloudflare biasanya
+re-challenge / block karena banyak parallel request dari cookie session
+yang sama. Gain dari paralelisme nggak besar karena bottleneck-nya network
+latency per request, bukan rate limit lokal.
+
+Aggregate throughput ≈ `workers / rate` req/s. Aman: ≤ 10 req/s.
 
 ### Bisa dilanjut kalau terputus
 
@@ -130,7 +150,8 @@ file `.env`:
 | `EK_DISCOVER_DELAY` | `3.0` | Detik antar kunjungan listing page |
 | `EK_LOAD_MORE_MAX_CLICKS` | `50` | Batas klik "Lihat Selengkapnya" |
 | `EK_LOAD_MORE_WAIT` | `1.5` | Detik tunggu setelah tiap klik loadMore |
-| `EK_SCRAPE_RATE` | `3.0` | Detik antar request ke detail page |
+| `EK_SCRAPE_RATE` | `3.0` | Detik antar request ke detail page (per worker) |
+| `EK_WORKERS` | `1` | Jumlah parallel scrape worker (max 5-7 aman) |
 | `EK_IMPERSONATE` | `chrome120` | Profile browser buat curl_cffi |
 
 Flag CLI selalu menang dari env var.

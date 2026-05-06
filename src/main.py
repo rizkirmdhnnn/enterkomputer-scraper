@@ -32,9 +32,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--stage", choices=["bypass", "discover", "scrape", "all"],
                    default="all")
     p.add_argument("--rate", type=float, default=None,
-                   help="Seconds between detail-page requests "
+                   help="Seconds between detail-page requests per worker "
                         "(default: 3.0, or EK_SCRAPE_RATE env var). "
                         "Higher = more polite.")
+    p.add_argument("--workers", type=int, default=None,
+                   help="Number of parallel scrape workers "
+                        "(default: 1, or EK_WORKERS env var). "
+                        "Aggregate throughput ≈ workers/rate req/s. "
+                        "Watch out for Cloudflare rate-limiting at >10 workers.")
     p.add_argument("--output", default="output/products.csv")
     p.add_argument("--state", default="state.json")
     p.add_argument("--urls-file", default="urls.txt")
@@ -81,6 +86,20 @@ def _resolve_rate(cli_rate: float | None) -> float:
     return 3.0
 
 
+def _resolve_workers(cli_workers: int | None) -> int:
+    """CLI flag wins; otherwise fall back to EK_WORKERS env var, else 1."""
+    if cli_workers is not None:
+        return max(1, cli_workers)
+    import os
+    raw = os.environ.get("EK_WORKERS")
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    return 1
+
+
 def run_scrape(args: argparse.Namespace, cookies: dict, user_agent: str) -> None:
     urls_path = Path(args.urls_file)
     if args.limit is not None:
@@ -94,7 +113,9 @@ def run_scrape(args: argparse.Namespace, cookies: dict, user_agent: str) -> None
         urls_to_scrape = urls_path
 
     rate = _resolve_rate(args.rate)
-    logging.info("Scrape rate: %.2fs between requests", rate)
+    workers = _resolve_workers(args.workers)
+    logging.info("Scrape rate: %.2fs/worker, workers: %d (aggregate ≈ %.1f req/s)",
+                 rate, workers, workers / rate if rate > 0 else float("inf"))
 
     counts = scrape_all(
         urls_file=urls_to_scrape,
@@ -103,6 +124,7 @@ def run_scrape(args: argparse.Namespace, cookies: dict, user_agent: str) -> None
         cookies=cookies,
         user_agent=user_agent,
         rate=rate,
+        workers=workers,
         refresh_cookies=get_clearance,
         failed_urls_path=Path(args.failed_urls_file),
     )
